@@ -39,7 +39,7 @@ node dist/index.js
 
 ---
 
-## ツール一覧 (16個)
+## ツール一覧 (17個)
 
 ### 読み取り系
 
@@ -61,6 +61,7 @@ node dist/index.js
 | `create_scenario` | シナリオ作成 | `name`, `triggerType`, `steps[]` |
 | `enroll_in_scenario` | シナリオ登録 | `friendId`, `scenarioId` |
 | `manage_tags` | タグ管理 | `action` (create/delete/add/remove), `name?`, `friendId?`, `tagId?` |
+| `manage_staff` | スタッフ管理 | `action` (create/list/get/update/delete/regenerate_key/me), `name?`, `role?`, `staffId?` |
 | `create_form` | フォーム作成 | `name`, `fields[]` |
 | `create_rich_menu` | リッチメニュー作成 | `name`, `areas[]`, `chatBarText?` |
 | `create_tracked_link` | トラッキングリンク作成 | `name`, `originalUrl`, `tagId?`, `scenarioId?` |
