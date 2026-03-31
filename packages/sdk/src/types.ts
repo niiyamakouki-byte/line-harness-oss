@@ -371,6 +371,40 @@ export interface UpdateStaffInput {
   isActive?: boolean
 }
 
+// ─── Chat ──────────────────────────────────────────────
+export type ChatStatus = 'open' | 'in_progress' | 'resolved' | 'closed'
+
+export interface Chat {
+  id: string
+  friendId: string
+  friendName: string
+  friendPictureUrl: string | null
+  operatorId: string | null
+  status: ChatStatus
+  notes: string | null
+  lastMessageAt: string | null
+  createdAt: string
+  updatedAt?: string
+}
+
+export interface ChatMessage {
+  id: string
+  direction: 'incoming' | 'outgoing'
+  messageType: string
+  content: string
+  createdAt: string
+}
+
+export interface ChatWithMessages extends Chat {
+  messages: ChatMessage[]
+}
+
+export interface ChatListParams {
+  status?: ChatStatus
+  operatorId?: string
+  accountId?: string
+}
+
 // ─── High-Level ─────────────────────────────────────────
 export interface StepDefinition {
   delay: string

@@ -8,6 +8,7 @@ import { TrackedLinksResource } from './resources/tracked-links.js'
 import { FormsResource } from './resources/forms.js'
 import { AdPlatformsResource } from './resources/ad-platforms.js'
 import { StaffResource } from './resources/staff.js'
+import { ChatsResource } from './resources/chats.js'
 import { Workflows } from './workflows.js'
 import type { LineHarnessConfig, StepDefinition, ScenarioTriggerType, ScenarioWithSteps, Broadcast, MessageType, SegmentCondition } from './types.js'
 
@@ -21,6 +22,7 @@ export class LineHarness {
   readonly forms: FormsResource
   readonly adPlatforms: AdPlatformsResource
   readonly staff: StaffResource
+  readonly chats: ChatsResource
 
   private readonly apiUrl: string
   private readonly defaultAccountId: string | undefined
@@ -52,6 +54,7 @@ export class LineHarness {
     this.forms = new FormsResource(http)
     this.adPlatforms = new AdPlatformsResource(http)
     this.staff = new StaffResource(http)
+    this.chats = new ChatsResource(http, this.defaultAccountId)
     this.workflows = new Workflows(this.friends, this.scenarios, this.broadcasts)
 
     this.createStepScenario = this.workflows.createStepScenario.bind(this.workflows)

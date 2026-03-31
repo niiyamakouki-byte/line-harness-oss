@@ -352,6 +352,17 @@ async function handleEvent(
       }
     }
 
+    // agent queue: 自動返信にマッチしなかった場合 or 常時 → Ollamaエージェントに回す
+    if (!matched && event.replyToken) {
+      try {
+        const queueId = crypto.randomUUID();
+        await db.prepare(
+          `INSERT INTO agent_queue (id, line_account_id, friend_id, reply_token, user_message, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', datetime('now', '+9 hours'))`
+        ).bind(queueId, lineAccountId ?? '', friend.id, event.replyToken, incomingText).run();
+        console.log("[agent] queued:", queueId, "| msg:", incomingText.slice(0, 30));
+      } catch(e) { console.error("[agent] INSERT failed:", e); }
+    }
+
     // イベントバス発火: message_received
     await fireEvent(db, 'message_received', {
       friendId: friend.id,

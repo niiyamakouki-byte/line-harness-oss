@@ -12,6 +12,7 @@ export { TrackedLinksResource } from './resources/tracked-links.js'
 export { FormsResource } from './resources/forms.js'
 export { AdPlatformsResource } from './resources/ad-platforms.js'
 export { StaffResource } from './resources/staff.js'
+export { ChatsResource } from './resources/chats.js'
 
 // All types
 export type {
@@ -59,6 +60,11 @@ export type {
   StaffProfile,
   CreateStaffInput,
   UpdateStaffInput,
+  ChatStatus,
+  Chat,
+  ChatMessage,
+  ChatWithMessages,
+  ChatListParams,
 } from './types.js'
 
 export type {

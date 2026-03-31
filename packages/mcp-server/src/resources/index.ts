@@ -1,7 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getClient } from "../client.js";
+import { registerNewMessagesResource } from "./new-messages.js";
 
 export function registerAllResources(server: McpServer): void {
+  registerNewMessagesResource(server);
   server.resource(
     "Account Summary",
     "line-harness://account/summary",
