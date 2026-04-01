@@ -9,6 +9,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   if (
     path === '/webhook' ||
     path === '/docs' ||
+    path === '/dashboard' ||
     path === '/openapi.json' ||
     path === '/api/affiliates/click' ||
     path.startsWith('/t/') ||
