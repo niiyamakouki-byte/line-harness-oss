@@ -8,6 +8,7 @@ import {
   getFriendTags,
   getScenarios,
   enrollFriendInScenario,
+  updateFriendRank,
   jstNow,
 } from '@line-crm/db';
 import type { Friend as DbFriend, Tag as DbTag } from '@line-crm/db';
@@ -29,6 +30,8 @@ function serializeFriend(row: DbFriend) {
     metadata: JSON.parse(row.metadata || '{}'),
     refCode: (row as unknown as Record<string, unknown>).ref_code as string | null,
     userId: row.user_id,
+    rank: row.rank ?? 'regular',
+    rankUpdatedAt: row.rank_updated_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -263,6 +266,39 @@ friends.put('/api/friends/:id/metadata', async (c) => {
     });
   } catch (err) {
     console.error('PUT /api/friends/:id/metadata error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// PUT /api/friends/:id/rank - update friend rank
+friends.put('/api/friends/:id/rank', async (c) => {
+  try {
+    const friendId = c.req.param('id');
+    const db = c.env.DB;
+
+    const friend = await getFriendById(db, friendId);
+    if (!friend) {
+      return c.json({ success: false, error: 'Friend not found' }, 404);
+    }
+
+    const body = await c.req.json<{ rank: string }>();
+    const validRanks = ['vip', 'premium', 'regular', 'trial', 'blocked'];
+    if (!body.rank || !validRanks.includes(body.rank)) {
+      return c.json({ success: false, error: `rank must be one of: ${validRanks.join(', ')}` }, 400);
+    }
+
+    const updated = await updateFriendRank(db, friendId, body.rank);
+    const tags = await getFriendTags(db, friendId);
+
+    return c.json({
+      success: true,
+      data: {
+        ...serializeFriend(updated!),
+        tags: tags.map(serializeTag),
+      },
+    });
+  } catch (err) {
+    console.error('PUT /api/friends/:id/rank error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

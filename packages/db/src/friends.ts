@@ -9,6 +9,8 @@ export interface Friend {
   user_id: string | null;
   line_account_id: string | null;
   metadata: string;
+  rank: string;
+  rank_updated_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -148,4 +150,19 @@ export async function getFriendCount(db: D1Database): Promise<number> {
     .prepare(`SELECT COUNT(*) as count FROM friends`)
     .first<{ count: number }>();
   return row?.count ?? 0;
+}
+
+export async function updateFriendRank(
+  db: D1Database,
+  friendId: string,
+  rank: string,
+): Promise<Friend | null> {
+  const now = jstNow();
+  await db
+    .prepare(
+      `UPDATE friends SET rank = ?, rank_updated_at = ?, updated_at = ? WHERE id = ?`,
+    )
+    .bind(rank, now, now, friendId)
+    .run();
+  return getFriendById(db, friendId);
 }

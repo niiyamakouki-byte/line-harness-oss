@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS friends (
   is_following     INTEGER NOT NULL DEFAULT 1,
   user_id          TEXT,
   score            INTEGER NOT NULL DEFAULT 0,
+  rank             TEXT NOT NULL DEFAULT 'regular',
+  rank_updated_at  TEXT DEFAULT NULL,
   created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
@@ -138,6 +140,8 @@ CREATE TABLE IF NOT EXISTS auto_replies (
   response_type    TEXT NOT NULL DEFAULT 'text',
   response_content TEXT NOT NULL,
   is_active        INTEGER NOT NULL DEFAULT 1,
+  permission_mode  TEXT NOT NULL DEFAULT 'allow_all',
+  allowed_ranks    TEXT DEFAULT NULL,
   created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 

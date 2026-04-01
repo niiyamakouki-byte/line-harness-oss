@@ -317,8 +317,13 @@ async function handleEvent(
         response_type: string;
         response_content: string;
         is_active: number;
+        permission_mode: string;
+        allowed_ranks: string | null;
         created_at: string;
       }>();
+
+    // Resolve friend rank for permission checking
+    const friendRank: string = friend.rank ?? 'regular';
 
     let matched = false;
     for (const rule of autoReplies.results) {
@@ -328,6 +333,12 @@ async function handleEvent(
           : incomingText.includes(rule.keyword);
 
       if (isMatch) {
+        // Permission guard: check if this friend's rank is allowed
+        if (!checkAutoReplyPermission(friendRank, rule)) {
+          console.log(`[permission] auto-reply ${rule.id} denied for friend ${friend.id} (rank=${friendRank}, mode=${rule.permission_mode})`);
+          continue;
+        }
+
         try {
           // Expand template variables ({{name}}, {{uid}}, {{auth_url:CHANNEL_ID}})
           const expandedContent = expandVariables(rule.response_content, friend as { id: string; display_name: string | null; user_id: string | null }, workerUrl);
@@ -370,6 +381,28 @@ async function handleEvent(
     }, lineAccessToken, lineAccountId);
 
     return;
+  }
+}
+
+/** Check whether an auto-reply rule permits delivery to a friend based on rank */
+function checkAutoReplyPermission(
+  friendRank: string,
+  autoReply: { permission_mode: string; allowed_ranks: string | null },
+): boolean {
+  switch (autoReply.permission_mode) {
+    case 'allow_all':
+      return true;
+    case 'deny_all':
+      return false;
+    case 'vip_only':
+      return friendRank === 'vip';
+    case 'by_rank': {
+      if (!autoReply.allowed_ranks) return true;
+      const ranks = JSON.parse(autoReply.allowed_ranks) as string[];
+      return ranks.includes(friendRank);
+    }
+    default:
+      return true;
   }
 }
 
