@@ -26,11 +26,14 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   }
 
   const authHeader = c.req.header('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  // Also accept ?key= query parameter for dashboard export and similar browser-initiated requests
+  const queryKey = new URL(c.req.url).searchParams.get('key');
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null;
+  const token = bearerToken || queryKey;
+
+  if (!token) {
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
-
-  const token = authHeader.slice('Bearer '.length);
 
   // Check staff_members table first
   const staff = await getStaffByApiKey(c.env.DB, token);

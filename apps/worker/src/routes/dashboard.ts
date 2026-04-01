@@ -106,10 +106,10 @@ dashboard.get('/api/dashboard/stats', async (c) => {
     ).first<{ c: number }>(),
     // Month-over-month: link clicks
     db.prepare(
-      `SELECT SUM(click_count) as c FROM tracked_links WHERE is_active = 1`
+      `SELECT COUNT(*) as c FROM link_clicks WHERE clicked_at >= date('now', 'start of month')`
     ).first<{ c: number }>(),
     db.prepare(
-      `SELECT COUNT(*) as c FROM link_clicks WHERE clicked_at >= date('now', 'start of month')`
+      `SELECT COUNT(*) as c FROM link_clicks WHERE clicked_at >= date('now', 'start of month', '-1 month') AND clicked_at < date('now', 'start of month')`
     ).first<{ c: number }>(),
   ]);
 
@@ -141,6 +141,14 @@ dashboard.get('/api/dashboard/stats', async (c) => {
 dashboard.get('/api/dashboard/export', async (c) => {
   const db = c.env.DB;
 
+  // Sanitize CSV fields to prevent spreadsheet formula injection
+  // Prefix dangerous characters with a single-quote so Excel/Sheets treats them as text
+  const csvSafe = (val: string): string => {
+    const s = (val || '').replace(/"/g, '""');
+    if (/^[=+\-@\t\r]/.test(s)) return "'" + s;
+    return s;
+  };
+
   const [friends, messages, links, forms, routes] = await Promise.all([
     db.prepare('SELECT id, display_name, is_following, ref_code, created_at FROM friends ORDER BY created_at DESC').all(),
     db.prepare(
@@ -160,7 +168,7 @@ dashboard.get('/api/dashboard/export', async (c) => {
   csv += '--- \u53CB\u3060\u3061\u4E00\u89A7 ---\n';
   csv += 'ID,\u8868\u793A\u540D,\u30D5\u30A9\u30ED\u30FC\u4E2D,\u6D41\u5165\u7D4C\u8DEF,\u767B\u9332\u65E5\n';
   for (const f of friends.results as any[]) {
-    csv += `"${f.id}","${(f.display_name || '').replace(/"/g, '""')}",${f.is_following ? '\u306F\u3044' : '\u3044\u3044\u3048'},"${(f.ref_code || '').replace(/"/g, '""')}","${f.created_at}"\n`;
+    csv += `"${csvSafe(f.id)}","${csvSafe(f.display_name)}",${f.is_following ? '\u306F\u3044' : '\u3044\u3044\u3048'},"${csvSafe(f.ref_code)}","${f.created_at}"\n`;
   }
 
   csv += '\n--- \u30E1\u30C3\u30BB\u30FC\u30B8\u7D71\u8A08\uFF0830\u65E5\u9593\uFF09 ---\n';
@@ -172,19 +180,19 @@ dashboard.get('/api/dashboard/export', async (c) => {
   csv += '\n--- \u30EA\u30F3\u30AF\u30AF\u30EA\u30C3\u30AF ---\n';
   csv += '\u30EA\u30F3\u30AF\u540D,URL,\u30AF\u30EA\u30C3\u30AF\u6570\n';
   for (const l of links.results as any[]) {
-    csv += `"${(l.name || '').replace(/"/g, '""')}","${(l.original_url || '').replace(/"/g, '""')}",${l.click_count}\n`;
+    csv += `"${csvSafe(l.name)}","${csvSafe(l.original_url)}",${l.click_count}\n`;
   }
 
   csv += '\n--- \u30D5\u30A9\u30FC\u30E0\u9001\u4FE1 ---\n';
   csv += '\u65E5\u4ED8,\u30D5\u30A9\u30FC\u30E0\u540D,\u53CB\u3060\u3061\u540D,\u30C7\u30FC\u30BF\n';
   for (const s of forms.results as any[]) {
-    csv += `"${s.created_at}","${(s.form_name || '').replace(/"/g, '""')}","${(s.friend_name || '').replace(/"/g, '""')}","${(s.data || '').replace(/"/g, '""')}"\n`;
+    csv += `"${s.created_at}","${csvSafe(s.form_name)}","${csvSafe(s.friend_name)}","${csvSafe(s.data)}"\n`;
   }
 
   csv += '\n--- \u6D41\u5165\u7D4C\u8DEF ---\n';
   csv += '\u7D4C\u8DEF\u30B3\u30FC\u30C9,\u4EBA\u6570\n';
   for (const r of routes.results as any[]) {
-    csv += `"${(r.ref_code || '').replace(/"/g, '""')}",${r.cnt}\n`;
+    csv += `"${csvSafe(r.ref_code)}",${r.cnt}\n`;
   }
 
   const now = new Date();
@@ -1018,14 +1026,23 @@ function renderMessages(msgs) {
 
   var days = {};
   var dayOrder = [];
+
+  // Build a complete 14-day sequence so zero-activity days are visible
+  var today = new Date();
+  for (var di = 13; di >= 0; di--) {
+    var dt = new Date(today);
+    dt.setDate(dt.getDate() - di);
+    var key = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+    days[key] = { incoming: 0, outgoing: 0 };
+    dayOrder.push(key);
+  }
+
+  // Overlay actual data onto the full range
   for (var i = 0; i < msgs.length; i++) {
     var m = msgs[i];
     if (!days[m.day]) { days[m.day] = { incoming: 0, outgoing: 0 }; dayOrder.push(m.day); }
     days[m.day][m.direction] = m.cnt;
   }
-
-  // Ensure chronological order
-  dayOrder.sort();
 
   el.innerHTML = '<div class="chart-container fade-in"><canvas id="msg-canvas"></canvas><div class="chart-tooltip" id="msg-tooltip"><div class="tt-date"></div><div class="tt-row"><span class="tt-dot" style="background:var(--blue)"></span><span class="tt-label">\u53D7\u4FE1</span><span class="tt-val" id="tt-in">0</span></div><div class="tt-row"><span class="tt-dot" style="background:var(--green)"></span><span class="tt-label">\u9001\u4FE1</span><span class="tt-val" id="tt-out">0</span></div></div></div>';
 
@@ -1142,12 +1159,9 @@ function renderMessages(msgs) {
     ctx.fill();
   }
 
-  canvas.addEventListener('mousemove', function(e) {
+  function showTooltip(mx, my) {
     var cd = canvas._chartData;
     if (!cd) return;
-    var rect = canvas.getBoundingClientRect();
-    var mx = e.clientX - rect.left;
-    var my = e.clientY - rect.top;
     var idx = Math.floor((mx - cd.padLeft) / cd.barGroupW);
     if (idx >= 0 && idx < cd.n && mx >= cd.padLeft && mx <= cd.padLeft + cd.chartW && my >= cd.padTop && my <= cd.padTop + cd.chartH) {
       var day = cd.dayOrder[idx];
@@ -1156,6 +1170,7 @@ function renderMessages(msgs) {
       document.getElementById('tt-in').textContent = num(d.incoming);
       document.getElementById('tt-out').textContent = num(d.outgoing);
       tooltip.classList.add('visible');
+      var rect = canvas.getBoundingClientRect();
       var tx = mx + 16;
       var ty = my - 40;
       if (tx + 160 > rect.width) tx = mx - 170;
@@ -1165,12 +1180,34 @@ function renderMessages(msgs) {
     } else {
       tooltip.classList.remove('visible');
     }
+  }
+
+  canvas.addEventListener('mousemove', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    showTooltip(e.clientX - rect.left, e.clientY - rect.top);
   });
   canvas.addEventListener('mouseleave', function() {
     tooltip.classList.remove('visible');
   });
+  // Touch support for mobile
+  canvas.addEventListener('touchstart', function(e) {
+    var touch = e.touches[0];
+    var rect = canvas.getBoundingClientRect();
+    showTooltip(touch.clientX - rect.left, touch.clientY - rect.top);
+  }, { passive: true });
+  canvas.addEventListener('touchmove', function(e) {
+    var touch = e.touches[0];
+    var rect = canvas.getBoundingClientRect();
+    showTooltip(touch.clientX - rect.left, touch.clientY - rect.top);
+  }, { passive: true });
+  canvas.addEventListener('touchend', function() {
+    setTimeout(function() { tooltip.classList.remove('visible'); }, 2000);
+  });
 
   drawChart();
+  // Remove previous resize listener to avoid memory leaks on refresh
+  if (window._dashboardResizeHandler) window.removeEventListener('resize', window._dashboardResizeHandler);
+  window._dashboardResizeHandler = drawChart;
   window.addEventListener('resize', drawChart);
 }
 
