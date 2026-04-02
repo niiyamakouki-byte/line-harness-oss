@@ -399,8 +399,12 @@ function checkAutoReplyPermission(
       return friendRank === 'vip';
     case 'by_rank': {
       if (!autoReply.allowed_ranks) return true;
-      const ranks = JSON.parse(autoReply.allowed_ranks) as string[];
-      return ranks.includes(friendRank);
+      try {
+        const ranks = JSON.parse(autoReply.allowed_ranks) as string[];
+        return ranks.includes(friendRank);
+      } catch {
+        return true;
+      }
     }
     default:
       return true;
