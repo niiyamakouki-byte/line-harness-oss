@@ -26,10 +26,16 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   }
 
   const authHeader = c.req.header('Authorization');
-  // Also accept ?key= query parameter for dashboard export and similar browser-initiated requests
-  const queryKey = new URL(c.req.url).searchParams.get('key');
   const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null;
-  const token = bearerToken || queryKey;
+
+  // Deprecated: ?key= query parameter exposes secrets in server logs and browser history.
+  // Support is removed. Use Authorization: Bearer <token> header instead.
+  const queryKey = new URL(c.req.url).searchParams.get('key');
+  if (queryKey) {
+    console.warn('[auth] ?key= query parameter is no longer supported; use Authorization: Bearer header');
+  }
+
+  const token = bearerToken;
 
   if (!token) {
     return c.json({ success: false, error: 'Unauthorized' }, 401);

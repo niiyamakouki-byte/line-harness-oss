@@ -49,6 +49,7 @@ export type Env = {
     LINE_LOGIN_CHANNEL_SECRET: string;
     WORKER_URL: string;
     X_HARNESS_URL?: string;  // Optional: X Harness API URL for account linking
+    ADMIN_ORIGIN?: string;   // Allowed CORS origin for admin UI (e.g. https://app.example.com)
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -57,8 +58,11 @@ export type Env = {
 
 const app = new Hono<Env>();
 
-// CORS — allow all origins for MVP
-app.use('*', cors({ origin: '*' }));
+// CORS — restrict to ADMIN_ORIGIN env var; falls back to same-origin (no wildcard)
+app.use('*', (c, next) => {
+  const allowedOrigin = c.env.ADMIN_ORIGIN ?? '';
+  return cors({ origin: allowedOrigin || [] })(c, next);
+});
 
 // Auth middleware — skips /webhook and /docs automatically
 app.use('*', authMiddleware);
