@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 import { verifySignature, LineClient } from '@line-crm/line-sdk';
 import type { WebhookRequestBody, WebhookEvent, TextEventMessage } from '@line-crm/line-sdk';
+
+// グループ AI 応答のトリガーワード
+const GROUP_TRIGGER_PATTERN = /(@ラポルタ|ラポルタbot|ラポルタBOT|@laporta)/i;
 import {
   upsertFriend,
   updateFriendFollowStatus,
@@ -56,7 +59,8 @@ webhook.post('/webhook', async (c) => {
   // Verify with resolved secret
   const valid = await verifySignature(channelSecret, rawBody, signature);
   if (!valid) {
-    console.error('Invalid LINE signature');
+    const dest = (body as { destination?: string }).destination ?? 'unknown';
+    console.error(`[webhook] signature mismatch: destination=${dest} sig_received=${signature.slice(0, 12)}... secret_prefix=${channelSecret ? channelSecret.slice(0, 6) + '...' : 'MISSING'} accounts_checked=${matchedAccountId ? 1 : 0}`);
     return c.json({ status: 'ok' }, 200);
   }
 
@@ -72,8 +76,23 @@ webhook.post('/webhook', async (c) => {
       }
     }
   })();
+  // グループ参加イベント処理
+  const joinPromise = (async () => {
+    for (const event of body.events) {
+      if (event.type === 'join') {
+        try {
+          await lineClient.replyMessage(event.replyToken, [{
+            type: 'text',
+            text: 'ラポルタ AI 秘書です！\n\n「@ラポルタ」と呼びかければ、見積もり・タスク管理・リマインダーなど何でもお手伝いします🏢\n\n例：\n「@ラポルタ タスク追加：図面確認」\n「@ラポルタ 10畳のフローリング費用は？」',
+          }]);
+        } catch (err) {
+          console.error('Error handling join event:', err);
+        }
+      }
+    }
+  })();
 
-  c.executionCtx.waitUntil(processingPromise);
+  c.executionCtx.waitUntil(Promise.all([processingPromise, joinPromise]));
 
   return c.json({ status: 'ok' }, 200);
 });
@@ -188,14 +207,43 @@ async function handleEvent(
 
   if (event.type === 'message' && event.message.type === 'text') {
     const textMessage = event.message as TextEventMessage;
-    const userId =
-      event.source.type === 'user' ? event.source.userId : undefined;
+    // source.userId はすべての source type で取得できる
+    const userId = (event.source as { userId?: string }).userId;
+    // グループ/ルーム ID を取得
+    const sourceType = event.source.type; // 'user' | 'group' | 'room'
+    const groupId =
+      event.source.type === 'group'
+        ? event.source.groupId
+        : event.source.type === 'room'
+          ? (event.source as { roomId?: string }).roomId
+          : null;
+
     if (!userId) return;
 
-    const friend = await getFriendByLineUserId(db, userId);
-    if (!friend) return;
+    // グループ内では @ラポルタ メンションがある場合のみ AI 応答
+    const isGroup = !!groupId;
+    const hasMention = GROUP_TRIGGER_PATTERN.test(textMessage.text);
+    if (isGroup && !hasMention) {
+      // グループメッセージをログに記録して終了（AI応答なし）
+      try {
+        const logId = crypto.randomUUID();
+        await db.prepare(
+          `INSERT INTO line_group_messages (id, group_id, line_user_id, display_name, message)
+           VALUES (?, ?, ?, NULL, ?)`
+        ).bind(logId, groupId, userId, textMessage.text.slice(0, 500)).run();
+      } catch { /* ログ失敗は無視 */ }
+      return;
+    }
 
-    const incomingText = textMessage.text;
+    // @ラポルタ を除いた実際のメッセージテキスト
+    const cleanText = textMessage.text.replace(GROUP_TRIGGER_PATTERN, '').trim();
+
+    // グループメッセージは friends テーブルになければスキップしない（グループ用はpush宛先がgroup_idなので）
+    const friend = await getFriendByLineUserId(db, userId);
+    // グループの場合は friend が null でも継続（group_id 宛に送れる）
+    if (!friend && !isGroup) return;
+
+    const incomingText = cleanText || textMessage.text;
     const now = jstNow();
     const logId = crypto.randomUUID();
 
@@ -364,14 +412,28 @@ async function handleEvent(
       }
     }
 
-    // agent queue: 自動返信にマッチしなかった場合 or 常時 → Ollamaエージェントに回す
-    if (!matched && event.replyToken) {
+    // agent queue: 自動返信にマッチしなかった場合 → AI エージェントに回す
+    // グループの場合は常に AI 応答（自動返信は 1:1 のみ）
+    const shouldQueue = isGroup ? hasMention : (!matched && !!event.replyToken);
+    if (shouldQueue) {
       try {
         const queueId = crypto.randomUUID();
         await db.prepare(
-          `INSERT INTO agent_queue (id, line_account_id, friend_id, reply_token, user_message, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', datetime('now', '+9 hours'))`
-        ).bind(queueId, lineAccountId ?? '', friend.id, event.replyToken, incomingText).run();
-        console.log("[agent] queued:", queueId, "| msg:", incomingText.slice(0, 30));
+          `INSERT INTO agent_queue
+             (id, line_account_id, friend_id, line_user_id, source_type, source_group_id,
+              reply_token, user_message, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now', '+9 hours'))`
+        ).bind(
+          queueId,
+          lineAccountId ?? '',
+          friend?.id ?? '',
+          userId,
+          sourceType,
+          groupId ?? null,
+          event.replyToken ?? null,
+          incomingText
+        ).run();
+        console.log(`[agent] queued: ${queueId} | type: ${sourceType} | group: ${groupId ?? 'none'} | msg: ${incomingText.slice(0, 30)}`);
       } catch(e) { console.error("[agent] INSERT failed:", e); }
     }
 
