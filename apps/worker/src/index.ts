@@ -50,6 +50,7 @@ export type Env = {
     WORKER_URL: string;
     X_HARNESS_URL?: string;  // Optional: X Harness API URL for account linking
     ADMIN_ORIGIN?: string;   // Allowed CORS origin for admin UI (e.g. https://app.example.com)
+    DISCORD_BOT_TOKEN?: string; // Optional: Discord Bot Token for file dispatch notifications
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };

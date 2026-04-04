@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { verifySignature, LineClient } from '@line-crm/line-sdk';
-import type { WebhookRequestBody, WebhookEvent, TextEventMessage } from '@line-crm/line-sdk';
+import type { WebhookRequestBody, WebhookEvent, TextEventMessage, FileEventMessage, ImageEventMessage } from '@line-crm/line-sdk';
+import { analyzeFile, notifyDiscord } from '../services/auto-dispatch.js';
 
 // グループ AI 応答のトリガーワード
 const GROUP_TRIGGER_PATTERN = /(@ラポルタ|ラポルタbot|ラポルタBOT|@laporta)/i;
@@ -70,7 +71,7 @@ webhook.post('/webhook', async (c) => {
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin);
+        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin, c.env.DISCORD_BOT_TOKEN);
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -104,6 +105,7 @@ async function handleEvent(
   lineAccessToken: string,
   lineAccountId: string | null = null,
   workerUrl?: string,
+  discordBotToken?: string,
 ): Promise<void> {
   if (event.type === 'follow') {
     const userId =
@@ -442,6 +444,64 @@ async function handleEvent(
       friendId: friend.id,
       eventData: { text: incomingText, matched },
     }, lineAccessToken, lineAccountId);
+
+    return;
+  }
+
+  // ─── ファイル受信 → 自動仕分け ────────────────────────────────────────────
+  if (event.type === 'message' && (event.message.type === 'file' || event.message.type === 'image')) {
+    const userId = (event.source as { userId?: string }).userId;
+    if (!userId) return;
+
+    // 送信者プロフィールを取得
+    let senderName = userId;
+    try {
+      const profile = await lineClient.getProfile(userId);
+      senderName = profile.displayName ?? userId;
+    } catch {
+      // プロフィール取得失敗は無視
+    }
+
+    let filename: string;
+    let messageId: string;
+    if (event.message.type === 'file') {
+      const fileMsg = event.message as FileEventMessage;
+      filename = fileMsg.fileName;
+      messageId = fileMsg.id;
+    } else {
+      const imgMsg = event.message as ImageEventMessage;
+      messageId = imgMsg.id;
+      filename = `image_${messageId}.jpg`;
+    }
+
+    // LINE Content API からファイルを取得
+    let buffer: ArrayBuffer = new ArrayBuffer(0);
+    try {
+      const contentRes = await fetch(
+        `https://api-data.line.me/v2/bot/message/${messageId}/content`,
+        { headers: { Authorization: `Bearer ${lineAccessToken}` } },
+      );
+      if (contentRes.ok) {
+        buffer = await contentRes.arrayBuffer();
+      }
+    } catch (err) {
+      console.error('[auto-dispatch] ファイル取得失敗:', err);
+    }
+
+    // 分析・仕分け
+    try {
+      const result = analyzeFile(filename, senderName, buffer);
+      console.log(`[auto-dispatch] 仕分け完了: ${result.savedPath}`);
+
+      // Discord に通知
+      await notifyDiscord(
+        result.classification.discordChannel,
+        result.discordMessage,
+        discordBotToken,
+      );
+    } catch (err) {
+      console.error('[auto-dispatch] 自動仕分けエラー:', err);
+    }
 
     return;
   }
