@@ -31,6 +31,33 @@ vi.mock('@/components/app-shell', () => ({
   default: ({ children }: any) => <div data-testid="app-shell">{children}</div>,
 }))
 
+vi.mock('@/lib/api', () => ({
+  api: {
+    automations: {
+      list: vi.fn(async () => ({ success: true, data: [] })),
+      create: vi.fn(async () => ({ success: true, data: {} })),
+      update: vi.fn(async () => ({ success: true, data: {} })),
+      delete: vi.fn(async () => ({ success: true, data: {} })),
+    },
+    tags: {
+      list: vi.fn(async () => ({ success: true, data: [] })),
+    },
+    friends: {
+      list: vi.fn(async () => ({
+        success: true,
+        data: { items: [], total: 0, hasNextPage: false },
+      })),
+      count: vi.fn(async () => ({ success: true, data: { count: 0 } })),
+      addTag: vi.fn(async () => ({ success: true, data: {} })),
+      removeTag: vi.fn(async () => ({ success: true, data: {} })),
+    },
+    scenarios: { list: vi.fn(async () => ({ success: true, data: [] })) },
+    broadcasts: { list: vi.fn(async () => ({ success: true, data: [] })) },
+    templates: { list: vi.fn(async () => ({ success: true, data: [] })) },
+    scoring: { rules: vi.fn(async () => ({ success: true, data: [] })) },
+  },
+}))
+
 describe('admin UI smoke tests', () => {
   it('renders the dashboard page shell', async () => {
     const { default: DashboardPage } = await import('@/app/page')
@@ -53,5 +80,21 @@ describe('admin UI smoke tests', () => {
     expect(html).toContain('lang="ja"')
     expect(html).toContain('data-testid="app-shell"')
     expect(html).toContain('Smoke Test Child')
+  })
+
+  it('renders the automations page shell', async () => {
+    const { default: AutomationsPage } = await import('@/app/automations/page')
+    const html = renderToStaticMarkup(<AutomationsPage />)
+
+    expect(html).toContain('オートメーション')
+    expect(html).toContain('新規ルール')
+  })
+
+  it('renders the friends page shell', async () => {
+    const { default: FriendsPage } = await import('@/app/friends/page')
+    const html = renderToStaticMarkup(<FriendsPage />)
+
+    expect(html).toContain('友だち管理')
+    expect(html).toContain('タグで絞り込み')
   })
 })
