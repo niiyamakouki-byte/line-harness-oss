@@ -272,7 +272,11 @@ async function handleEvent(
     if (timeMatch) {
       const hour = parseInt(timeMatch[1], 10);
       if (hour >= 6 && hour <= 22) {
-        // Save preferred_hour to friend metadata
+        // Save preferred_hour to friend metadata (グループ内で friend が null の場合はスキップ)
+        if (!friend) {
+          // group context without registered friend — skip time setting
+          return;
+        }
         const existing = await db.prepare('SELECT metadata FROM friends WHERE id = ?').bind(friend.id).first<{ metadata: string }>();
         const meta = JSON.parse(existing?.metadata || '{}');
         meta.preferred_hour = hour;
@@ -304,7 +308,7 @@ async function handleEvent(
     }
 
     // Cross-account trigger: send message from another account via UUID
-    if (incomingText === '体験を完了する' && lineAccountId) {
+    if (incomingText === '体験を完了する' && lineAccountId && friend) {
       try {
         const friendRecord = await db.prepare('SELECT user_id FROM friends WHERE id = ?').bind(friend.id).first<{ user_id: string | null }>();
         if (friendRecord?.user_id) {
@@ -374,7 +378,7 @@ async function handleEvent(
       }>();
 
     // Resolve friend rank for permission checking
-    const friendRank: string = friend.rank ?? 'regular';
+    const friendRank: string = friend?.rank ?? 'regular';
 
     let matched = false;
     for (const rule of autoReplies.results) {
@@ -386,7 +390,7 @@ async function handleEvent(
       if (isMatch) {
         // Permission guard: check if this friend's rank is allowed
         if (!checkAutoReplyPermission(friendRank, rule)) {
-          console.log(`[permission] auto-reply ${rule.id} denied for friend ${friend.id} (rank=${friendRank}, mode=${rule.permission_mode})`);
+          console.log(`[permission] auto-reply ${rule.id} denied for friend ${friend?.id ?? 'unknown'} (rank=${friendRank}, mode=${rule.permission_mode})`);
           continue;
         }
 
@@ -403,7 +407,7 @@ async function handleEvent(
               `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
                VALUES (?, ?, 'outgoing', ?, ?, NULL, NULL, 'reply', ?)`,
             )
-            .bind(outLogId, friend.id, rule.response_type, rule.response_content, jstNow())
+            .bind(outLogId, friend?.id ?? null, rule.response_type, rule.response_content, jstNow())
             .run();
         } catch (err) {
           console.error('Failed to send auto-reply', err);
@@ -439,11 +443,13 @@ async function handleEvent(
       } catch(e) { console.error("[agent] INSERT failed:", e); }
     }
 
-    // イベントバス発火: message_received
-    await fireEvent(db, 'message_received', {
-      friendId: friend.id,
-      eventData: { text: incomingText, matched },
-    }, lineAccessToken, lineAccountId);
+    // イベントバス発火: message_received (friend が null のグループユーザーはスキップ)
+    if (friend) {
+      await fireEvent(db, 'message_received', {
+        friendId: friend.id,
+        eventData: { text: incomingText, matched },
+      }, lineAccessToken, lineAccountId);
+    }
 
     return;
   }
