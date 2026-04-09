@@ -1,31 +1,5 @@
 import { describe, it, expect } from 'vitest';
-
-// Inline replica of checkAutoReplyPermission from apps/worker/src/routes/webhook.ts
-// (function is not exported; tested here as a pure unit)
-function checkAutoReplyPermission(
-  friendRank: string,
-  autoReply: { permission_mode: string; allowed_ranks: string | null },
-): boolean {
-  switch (autoReply.permission_mode) {
-    case 'allow_all':
-      return true;
-    case 'deny_all':
-      return false;
-    case 'vip_only':
-      return friendRank === 'vip';
-    case 'by_rank': {
-      if (!autoReply.allowed_ranks) return true;
-      try {
-        const ranks = JSON.parse(autoReply.allowed_ranks) as string[];
-        return ranks.includes(friendRank);
-      } catch {
-        return true;
-      }
-    }
-    default:
-      return true;
-  }
-}
+import { checkAutoReplyPermission } from '../src/routes/auto-reply.js';
 
 describe('checkAutoReplyPermission', () => {
   it('allow_all always returns true regardless of rank', () => {

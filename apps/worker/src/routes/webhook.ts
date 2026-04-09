@@ -21,6 +21,7 @@ import {
 import { fireEvent } from '../services/event-bus.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
+import { checkAutoReplyPermission, getPatternAutoReply } from './auto-reply.js';
 
 const webhook = new Hono<Env>();
 
@@ -433,6 +434,7 @@ async function handleEvent(
     // NOTE: Auto-replies use replyMessage (free, no quota) instead of pushMessage
     // The replyToken is only valid for ~1 minute after the message event
     let matched = false;
+    let replied = false;
     if (!isGroup && friend) {
       const autoReplies = await db
         .prepare('SELECT * FROM auto_replies WHERE is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC')
@@ -481,14 +483,38 @@ async function handleEvent(
           }
 
           matched = true;
+          replied = true;
           break;
+        }
+      }
+
+      if (!replied) {
+        try {
+          const patternReply = getPatternAutoReply(incomingText);
+          await lineClient.replyMessage(event.replyToken, [
+            buildMessage(patternReply.responseType, patternReply.responseContent),
+          ]);
+
+          const outLogId = crypto.randomUUID();
+          await db
+            .prepare(
+              `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
+               VALUES (?, ?, 'outgoing', ?, ?, NULL, NULL, 'reply', ?)`,
+            )
+            .bind(outLogId, friend.id, patternReply.responseType, patternReply.responseContent, jstNow())
+            .run();
+
+          matched = patternReply.matched;
+          replied = true;
+        } catch (err) {
+          console.error('Failed to send pattern auto-reply', err);
         }
       }
     }
 
     // agent queue: 自動返信にマッチしなかった場合 → AI エージェントに回す
     // グループの場合は常に AI 応答（自動返信は 1:1 のみ）
-    const shouldQueue = isGroup ? hasMention : (!matched && !!event.replyToken);
+    const shouldQueue = isGroup ? hasMention : (!replied && !!event.replyToken);
     if (shouldQueue) {
       try {
         const queueId = crypto.randomUUID();
@@ -576,32 +602,6 @@ async function handleEvent(
     }
 
     return;
-  }
-}
-
-/** Check whether an auto-reply rule permits delivery to a friend based on rank */
-function checkAutoReplyPermission(
-  friendRank: string,
-  autoReply: { permission_mode: string; allowed_ranks: string | null },
-): boolean {
-  switch (autoReply.permission_mode) {
-    case 'allow_all':
-      return true;
-    case 'deny_all':
-      return false;
-    case 'vip_only':
-      return friendRank === 'vip';
-    case 'by_rank': {
-      if (!autoReply.allowed_ranks) return true;
-      try {
-        const ranks = JSON.parse(autoReply.allowed_ranks) as string[];
-        return ranks.includes(friendRank);
-      } catch {
-        return true;
-      }
-    }
-    default:
-      return true;
   }
 }
 
