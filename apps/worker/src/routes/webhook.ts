@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { verifySignature, LineClient } from '@line-crm/line-sdk';
-import type { WebhookRequestBody, WebhookEvent, TextEventMessage, FileEventMessage, ImageEventMessage } from '@line-crm/line-sdk';
+import type { WebhookRequestBody, WebhookEvent } from '@line-crm/line-sdk';
 import { analyzeFile, notifyDiscord } from '../services/auto-dispatch.js';
 
 // グループ AI 応答のトリガーワード
@@ -24,6 +24,71 @@ import type { Env } from '../index.js';
 
 const webhook = new Hono<Env>();
 
+function isWebhookSource(source: unknown): boolean {
+  if (!source || typeof source !== 'object') return false;
+
+  const candidate = source as Record<string, unknown>;
+  switch (candidate.type) {
+    case 'user':
+      return typeof candidate.userId === 'string';
+    case 'group':
+      return typeof candidate.groupId === 'string' && (candidate.userId === undefined || typeof candidate.userId === 'string');
+    case 'room':
+      return typeof candidate.roomId === 'string' && (candidate.userId === undefined || typeof candidate.userId === 'string');
+    default:
+      return false;
+  }
+}
+
+function isWebhookEvent(event: unknown): event is WebhookEvent {
+  if (!event || typeof event !== 'object') return false;
+
+  const candidate = event as Record<string, unknown>;
+  if (typeof candidate.type !== 'string' || !isWebhookSource(candidate.source)) return false;
+
+  switch (candidate.type) {
+    case 'follow':
+    case 'join':
+    case 'postback':
+      return typeof candidate.replyToken === 'string';
+    case 'unfollow':
+      return true;
+    case 'message': {
+      if (typeof candidate.replyToken !== 'string' || !candidate.message || typeof candidate.message !== 'object') {
+        return false;
+      }
+      const message = candidate.message as Record<string, unknown>;
+      return typeof message.type === 'string';
+    }
+    default:
+      return false;
+  }
+}
+
+function isWebhookRequestBody(body: unknown): body is WebhookRequestBody {
+  if (!body || typeof body !== 'object') return false;
+
+  const candidate = body as Record<string, unknown>;
+  return (
+    typeof candidate.destination === 'string'
+    && Array.isArray(candidate.events)
+    && candidate.events.every(isWebhookEvent)
+  );
+}
+
+function parseFriendMetadata(metadata: string | null | undefined): Record<string, unknown> {
+  if (!metadata) return {};
+
+  try {
+    const parsed = JSON.parse(metadata) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 webhook.post('/webhook', async (c) => {
   const rawBody = await c.req.text();
   const signature = c.req.header('X-Line-Signature') ?? '';
@@ -31,7 +96,12 @@ webhook.post('/webhook', async (c) => {
 
   let body: WebhookRequestBody;
   try {
-    body = JSON.parse(rawBody) as WebhookRequestBody;
+    const parsedBody = JSON.parse(rawBody) as unknown;
+    if (!isWebhookRequestBody(parsedBody)) {
+      console.error('Invalid webhook body shape');
+      return c.json({ status: 'ok' }, 200);
+    }
+    body = parsedBody;
   } catch {
     console.error('Failed to parse webhook body');
     return c.json({ status: 'ok' }, 200);
@@ -43,7 +113,7 @@ webhook.post('/webhook', async (c) => {
   let channelAccessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
   let matchedAccountId: string | null = null;
 
-  if ((body as { destination?: string }).destination) {
+  if (body.destination) {
     const accounts = await getLineAccounts(db);
     for (const account of accounts) {
       if (!account.is_active) continue;
@@ -60,7 +130,7 @@ webhook.post('/webhook', async (c) => {
   // Verify with resolved secret
   const valid = await verifySignature(channelSecret, rawBody, signature);
   if (!valid) {
-    const dest = (body as { destination?: string }).destination ?? 'unknown';
+    const dest = body.destination ?? 'unknown';
     console.error(`[webhook] signature mismatch: destination=${dest} sig_received=${signature.slice(0, 12)}... secret_prefix=${channelSecret ? channelSecret.slice(0, 6) + '...' : 'MISSING'} accounts_checked=${matchedAccountId ? 1 : 0}`);
     return c.json({ status: 'ok' }, 200);
   }
@@ -152,7 +222,7 @@ async function handleEvent(
             const firstStep = steps[0];
             if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
               try {
-                const expandedContent = expandVariables(firstStep.message_content, friend as { id: string; display_name: string | null; user_id: string | null });
+                const expandedContent = expandVariables(firstStep.message_content, friend);
                 const message = buildMessage(firstStep.message_type, expandedContent);
                 await lineClient.replyMessage(event.replyToken, [message]);
                 console.log(`Immediate delivery: sent step ${firstStep.id} to ${userId}`);
@@ -208,16 +278,16 @@ async function handleEvent(
   }
 
   if (event.type === 'message' && event.message.type === 'text') {
-    const textMessage = event.message as TextEventMessage;
+    const textMessage = event.message;
     // source.userId はすべての source type で取得できる
-    const userId = (event.source as { userId?: string }).userId;
+    const userId = event.source.userId;
     // グループ/ルーム ID を取得
     const sourceType = event.source.type; // 'user' | 'group' | 'room'
     const groupId =
       event.source.type === 'group'
         ? event.source.groupId
         : event.source.type === 'room'
-          ? (event.source as { roomId?: string }).roomId
+          ? event.source.roomId
           : null;
 
     if (!userId) return;
@@ -278,7 +348,7 @@ async function handleEvent(
           return;
         }
         const existing = await db.prepare('SELECT metadata FROM friends WHERE id = ?').bind(friend.id).first<{ metadata: string }>();
-        const meta = JSON.parse(existing?.metadata || '{}');
+        const meta = parseFriendMetadata(existing?.metadata);
         meta.preferred_hour = hour;
         await db.prepare('UPDATE friends SET metadata = ?, updated_at = ? WHERE id = ?')
           .bind(JSON.stringify(meta), jstNow(), friend.id).run();
@@ -362,59 +432,57 @@ async function handleEvent(
     // 自動返信チェック（このアカウントのルール + グローバルルールのみ）
     // NOTE: Auto-replies use replyMessage (free, no quota) instead of pushMessage
     // The replyToken is only valid for ~1 minute after the message event
-    const autoReplies = await db
-      .prepare('SELECT * FROM auto_replies WHERE is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC')
-      .bind(lineAccountId ?? null)
-      .all<{
-        id: string;
-        keyword: string;
-        match_type: 'exact' | 'contains';
-        response_type: string;
-        response_content: string;
-        is_active: number;
-        permission_mode: string;
-        allowed_ranks: string | null;
-        created_at: string;
-      }>();
-
-    // Resolve friend rank for permission checking
-    const friendRank: string = friend?.rank ?? 'regular';
-
     let matched = false;
-    for (const rule of autoReplies.results) {
-      const isMatch =
-        rule.match_type === 'exact'
-          ? incomingText === rule.keyword
-          : incomingText.includes(rule.keyword);
+    if (!isGroup && friend) {
+      const autoReplies = await db
+        .prepare('SELECT * FROM auto_replies WHERE is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC')
+        .bind(lineAccountId ?? null)
+        .all<{
+          id: string;
+          keyword: string;
+          match_type: 'exact' | 'contains';
+          response_type: string;
+          response_content: string;
+          is_active: number;
+          permission_mode: string;
+          allowed_ranks: string | null;
+          created_at: string;
+        }>();
 
-      if (isMatch) {
-        // Permission guard: check if this friend's rank is allowed
-        if (!checkAutoReplyPermission(friendRank, rule)) {
-          console.log(`[permission] auto-reply ${rule.id} denied for friend ${friend?.id ?? 'unknown'} (rank=${friendRank}, mode=${rule.permission_mode})`);
-          continue;
+      const friendRank = friend.rank ?? 'regular';
+
+      for (const rule of autoReplies.results) {
+        const isMatch =
+          rule.match_type === 'exact'
+            ? incomingText === rule.keyword
+            : incomingText.includes(rule.keyword);
+
+        if (isMatch) {
+          if (!checkAutoReplyPermission(friendRank, rule)) {
+            console.log(`[permission] auto-reply ${rule.id} denied for friend ${friend.id} (rank=${friendRank}, mode=${rule.permission_mode})`);
+            continue;
+          }
+
+          try {
+            const expandedContent = expandVariables(rule.response_content, friend, workerUrl);
+            const replyMsg = buildMessage(rule.response_type, expandedContent);
+            await lineClient.replyMessage(event.replyToken, [replyMsg]);
+
+            const outLogId = crypto.randomUUID();
+            await db
+              .prepare(
+                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
+                 VALUES (?, ?, 'outgoing', ?, ?, NULL, NULL, 'reply', ?)`,
+              )
+              .bind(outLogId, friend.id, rule.response_type, rule.response_content, jstNow())
+              .run();
+          } catch (err) {
+            console.error('Failed to send auto-reply', err);
+          }
+
+          matched = true;
+          break;
         }
-
-        try {
-          // Expand template variables ({{name}}, {{uid}}, {{auth_url:CHANNEL_ID}})
-          const expandedContent = expandVariables(rule.response_content, friend as { id: string; display_name: string | null; user_id: string | null }, workerUrl);
-          const replyMsg = buildMessage(rule.response_type, expandedContent);
-          await lineClient.replyMessage(event.replyToken, [replyMsg]);
-
-          // 送信ログ（replyMessage = 無料）
-          const outLogId = crypto.randomUUID();
-          await db
-            .prepare(
-              `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
-               VALUES (?, ?, 'outgoing', ?, ?, NULL, NULL, 'reply', ?)`,
-            )
-            .bind(outLogId, friend?.id ?? null, rule.response_type, rule.response_content, jstNow())
-            .run();
-        } catch (err) {
-          console.error('Failed to send auto-reply', err);
-        }
-
-        matched = true;
-        break;
       }
     }
 
@@ -456,7 +524,7 @@ async function handleEvent(
 
   // ─── ファイル受信 → 自動仕分け ────────────────────────────────────────────
   if (event.type === 'message' && (event.message.type === 'file' || event.message.type === 'image')) {
-    const userId = (event.source as { userId?: string }).userId;
+    const userId = event.source.userId;
     if (!userId) return;
 
     // 送信者プロフィールを取得
@@ -471,12 +539,10 @@ async function handleEvent(
     let filename: string;
     let messageId: string;
     if (event.message.type === 'file') {
-      const fileMsg = event.message as FileEventMessage;
-      filename = fileMsg.fileName;
-      messageId = fileMsg.id;
+      filename = event.message.fileName;
+      messageId = event.message.id;
     } else {
-      const imgMsg = event.message as ImageEventMessage;
-      messageId = imgMsg.id;
+      messageId = event.message.id;
       filename = `image_${messageId}.jpg`;
     }
 

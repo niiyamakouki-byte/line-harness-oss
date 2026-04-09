@@ -11,6 +11,17 @@ import type { Env } from '../index.js';
 
 const health = new Hono<Env>();
 
+health.get('/health', (c) => {
+  return c.json({
+    success: true,
+    data: {
+      service: 'worker',
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    },
+  });
+});
+
 // ========== アカウントヘルス ==========
 
 health.get('/api/accounts/:id/health', async (c) => {

@@ -32,6 +32,7 @@ export type {
   ImageEventMessage,
   ImageMessage,
   ImageMapMessageType,
+  JoinEvent,
   LocationEventMessage,
   Message,
   MessageEvent,

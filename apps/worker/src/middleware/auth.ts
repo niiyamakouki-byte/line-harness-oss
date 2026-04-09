@@ -8,6 +8,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   const path = new URL(c.req.url).pathname;
   if (
     path === '/webhook' ||
+    path === '/health' ||
     path === '/docs' ||
     path === '/dashboard' ||
     path === '/measure-guide' ||

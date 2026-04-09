@@ -115,6 +115,12 @@ export interface FollowEvent extends BaseEvent {
   source: UserSource | GroupSource | RoomSource;
 }
 
+export interface JoinEvent extends BaseEvent {
+  type: 'join';
+  replyToken: string;
+  source: GroupSource | RoomSource;
+}
+
 export interface UnfollowEvent extends BaseEvent {
   type: 'unfollow';
   source: UserSource | GroupSource | RoomSource;
@@ -132,6 +138,7 @@ export interface PostbackEvent extends BaseEvent {
 export type WebhookEvent =
   | MessageEvent
   | FollowEvent
+  | JoinEvent
   | UnfollowEvent
   | PostbackEvent;
 
