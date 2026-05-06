@@ -8,9 +8,11 @@ export function registerSendMessage(server: McpServer): void {
     "send_message",
     "Send a text or flex message to a specific friend. Use messageType 'flex' for rich card layouts.",
     {
-      friendId: z.string().describe("The friend's ID to send the message to"),
+      friendId: z.string().min(1).describe("The friend's ID to send the message to"),
       content: z
         .string()
+        .min(1)
+        .max(5000)
         .describe(
           "Message content. For text: plain string. For flex: JSON string of LINE Flex Message.",
         ),

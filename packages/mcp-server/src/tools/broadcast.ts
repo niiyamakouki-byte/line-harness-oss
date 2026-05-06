@@ -10,10 +10,14 @@ export function registerBroadcast(server: McpServer): void {
     {
       title: z
         .string()
+        .min(1)
+        .max(200)
         .describe("Internal title for this broadcast (not shown to users)"),
       messageType: z.enum(["text", "flex"]).describe("Message type"),
       messageContent: z
         .string()
+        .min(1)
+        .max(10000)
         .describe(
           "Message content. For text: plain string. For flex: JSON string.",
         ),
