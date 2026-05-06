@@ -50,11 +50,23 @@ export function startWebhookListener(
 
     // Webhook endpoint
     if (req.method === "POST" && req.url === "/webhook") {
+      const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB
       let body = "";
+      let bodyBytes = 0;
+      let aborted = false;
       req.on("data", (chunk: Buffer) => {
+        bodyBytes += chunk.byteLength;
+        if (bodyBytes > MAX_BODY_BYTES) {
+          aborted = true;
+          res.writeHead(413, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Payload too large" }));
+          req.destroy();
+          return;
+        }
         body += chunk.toString();
       });
       req.on("end", async () => {
+        if (aborted) return;
         try {
           const payload = JSON.parse(body) as WebhookEvent;
 
