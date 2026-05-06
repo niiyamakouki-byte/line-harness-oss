@@ -89,6 +89,17 @@ trackedLinks.post('/api/tracked-links', async (c) => {
       return c.json({ success: false, error: 'name and originalUrl are required' }, 400);
     }
 
+    // Validate URL scheme to prevent open-redirect / SSRF via javascript:, data:, file: etc.
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(body.originalUrl);
+    } catch {
+      return c.json({ success: false, error: 'originalUrl must be a valid URL' }, 400);
+    }
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      return c.json({ success: false, error: 'originalUrl must use http or https scheme' }, 400);
+    }
+
     const link = await createTrackedLink(c.env.DB, {
       name: body.name,
       originalUrl: body.originalUrl,
