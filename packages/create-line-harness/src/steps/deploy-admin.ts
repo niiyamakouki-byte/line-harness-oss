@@ -30,9 +30,9 @@ export async function deployAdmin(
   // Build Next.js
   try {
     await execa("pnpm", ["run", "build"], { cwd: webDir });
-  } catch (error: any) {
+  } catch (error: unknown) {
     s.stop("Admin UI ビルド失敗");
-    throw new Error(`Admin UI のビルドに失敗しました: ${error.message}`);
+    throw new Error(`Admin UI のビルドに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
   s.stop("Admin UI ビルド完了");
 
@@ -67,8 +67,8 @@ export async function deployAdmin(
 
     s.stop("Admin UI デプロイ完了");
     return { adminUrl };
-  } catch (error: any) {
+  } catch (error: unknown) {
     s.stop("Admin UI デプロイ失敗");
-    throw new Error(`Admin UI のデプロイに失敗しました: ${error.message}`);
+    throw new Error(`Admin UI のデプロイに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

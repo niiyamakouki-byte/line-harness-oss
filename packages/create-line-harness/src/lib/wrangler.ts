@@ -21,10 +21,12 @@ export async function wrangler(
       env: { ...process.env, FORCE_COLOR: "0" },
     });
     return result.stdout;
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const stderr = (error as Record<string, unknown>).stderr;
+    const msg = (error as Record<string, unknown>).message;
     throw new WranglerError(
-      `wrangler ${args[0]} failed: ${error.stderr || error.message}`,
-      error.stderr || "",
+      `wrangler ${args[0]} failed: ${typeof stderr === 'string' && stderr ? stderr : (error instanceof Error ? error.message : String(msg ?? error))}`,
+      typeof stderr === 'string' ? stderr : "",
     );
   }
 }

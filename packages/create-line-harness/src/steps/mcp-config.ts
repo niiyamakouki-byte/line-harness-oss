@@ -19,7 +19,7 @@ export function generateMcpConfig(options: McpConfigOptions): void {
     },
   };
 
-  let mcpConfig: Record<string, any> = {};
+  let mcpConfig: Record<string, unknown> = {};
 
   if (existsSync(mcpJsonPath)) {
     try {

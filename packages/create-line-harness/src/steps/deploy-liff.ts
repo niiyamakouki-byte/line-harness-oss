@@ -29,9 +29,9 @@ export async function deployLiff(
   // Build Vite app
   try {
     await execa("pnpm", ["run", "build"], { cwd: liffDir });
-  } catch (error: any) {
+  } catch (error: unknown) {
     s.stop("LIFF ビルド失敗");
-    throw new Error(`LIFF のビルドに失敗しました: ${error.message}`);
+    throw new Error(`LIFF のビルドに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
   s.stop("LIFF ビルド完了");
 
@@ -66,8 +66,8 @@ export async function deployLiff(
 
     s.stop("LIFF デプロイ完了");
     return { liffUrl };
-  } catch (error: any) {
+  } catch (error: unknown) {
     s.stop("LIFF デプロイ失敗");
-    throw new Error(`LIFF のデプロイに失敗しました: ${error.message}`);
+    throw new Error(`LIFF のデプロイに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
