@@ -66,6 +66,10 @@ async function fireOutgoingWebhooks(
   try {
     const webhooks = await getActiveOutgoingWebhooksByEvent(db, eventType);
     for (const wh of webhooks) {
+      if (isPrivateUrl(wh.url)) {
+        console.warn(`[event-bus] outgoing webhook ${wh.id} blocked SSRF target: ${wh.url}`);
+        continue;
+      }
       try {
         const body = JSON.stringify({
           event: eventType,
