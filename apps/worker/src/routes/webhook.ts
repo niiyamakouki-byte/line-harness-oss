@@ -300,16 +300,20 @@ async function handleEvent(
       // グループメッセージをログに記録して終了（AI応答なし）
       try {
         const logId = crypto.randomUUID();
+        // eslint-disable-next-line no-control-regex
+        const safeMsg = textMessage.text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, 500);
         await db.prepare(
           `INSERT INTO line_group_messages (id, group_id, line_user_id, display_name, message)
            VALUES (?, ?, ?, NULL, ?)`
-        ).bind(logId, groupId, userId, textMessage.text.slice(0, 500)).run();
+        ).bind(logId, groupId, userId, safeMsg).run();
       } catch { /* ログ失敗は無視 */ }
       return;
     }
 
-    // @ラポルタ を除いた実際のメッセージテキスト
-    const cleanText = textMessage.text.replace(GROUP_TRIGGER_PATTERN, '').trim();
+    // @ラポルタ を除いた実際のメッセージテキスト (NUL/ctrl-chars stripped)
+    // eslint-disable-next-line no-control-regex
+    const sanitizedText = textMessage.text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    const cleanText = sanitizedText.replace(GROUP_TRIGGER_PATTERN, '').trim();
 
     // グループメッセージは friends テーブルになければスキップしない（グループ用はpush宛先がgroup_idなので）
     const friend = await getFriendByLineUserId(db, userId);
