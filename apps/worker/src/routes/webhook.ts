@@ -572,7 +572,8 @@ async function handleEvent(
       filename = `image_${messageId}.jpg`;
     }
 
-    // LINE Content API からファイルを取得
+    // LINE Content API からファイルを取得 (50 MB cap)
+    const MAX_FILE_BYTES = 50 * 1024 * 1024;
     let buffer: ArrayBuffer = new ArrayBuffer(0);
     try {
       const contentRes = await fetch(
@@ -580,7 +581,17 @@ async function handleEvent(
         { headers: { Authorization: `Bearer ${lineAccessToken}` } },
       );
       if (contentRes.ok) {
-        buffer = await contentRes.arrayBuffer();
+        const contentLength = Number(contentRes.headers.get('content-length') ?? '0');
+        if (contentLength > MAX_FILE_BYTES) {
+          console.warn(`[auto-dispatch] ファイルサイズ超過 (${contentLength} bytes): ${filename}`);
+        } else {
+          const raw = await contentRes.arrayBuffer();
+          if (raw.byteLength <= MAX_FILE_BYTES) {
+            buffer = raw;
+          } else {
+            console.warn(`[auto-dispatch] ファイルサイズ超過 (${raw.byteLength} bytes): ${filename}`);
+          }
+        }
       }
     } catch (err) {
       console.error('[auto-dispatch] ファイル取得失敗:', err);
