@@ -188,6 +188,12 @@ forms.post('/api/forms/:id/submit', async (c) => {
 
     const submissionData = body.data ?? {};
 
+    // Reject oversized submissions before touching the DB (public endpoint, no auth)
+    const serializedData = JSON.stringify(submissionData);
+    if (serializedData.length > 64_000) {
+      return c.json({ success: false, error: 'Submission data too large' }, 400);
+    }
+
     // Validate required fields
     const fields = JSON.parse(form.fields || '[]') as Array<{
       name: string;
@@ -221,7 +227,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
     const submission = await createFormSubmission(c.env.DB, {
       formId,
       friendId: friendId || null,
-      data: JSON.stringify(submissionData),
+      data: serializedData,
     });
 
     // Side effects (best-effort, don't fail the request)
