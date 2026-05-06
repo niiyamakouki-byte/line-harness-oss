@@ -196,6 +196,32 @@ function matchConditions(
   return true;
 }
 
+/**
+ * Returns true if the URL resolves to a private/internal address that must not
+ * be reached from automation webhooks (SSRF prevention).
+ */
+function isPrivateUrl(rawUrl: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return true; // malformed URL → block
+  }
+  const proto = parsed.protocol;
+  if (proto !== 'https:' && proto !== 'http:') return true;
+  const host = parsed.hostname.toLowerCase();
+  // Block .local / .internal TLDs
+  if (host.endsWith('.local') || host.endsWith('.internal')) return true;
+  // Block loopback / link-local / private IPv4
+  // 127.x.x.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x, 0.0.0.0
+  const v4 = /^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.0\.0\.0)/.test(host);
+  if (v4) return true;
+  // Block IPv6 loopback (::1), ULA (fc00::/7 = fc and fd prefixes), ::ffff: mapped
+  const v6 = /^(\[::1\]|\[::ffff:|localhost$|\[fc[0-9a-f]{2}:|\[fd[0-9a-f]{2}:)/.test(host);
+  if (v6) return true;
+  return false;
+}
+
 /** アクション実行 */
 async function executeAction(
   db: D1Database,
@@ -246,12 +272,14 @@ async function executeAction(
 
     case 'send_webhook': {
       const url = action.params.url;
-      if (url) {
+      if (url && !isPrivateUrl(url)) {
         await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ friendId, ...payload.eventData }),
         });
+      } else if (url) {
+        console.warn(`[event-bus] send_webhook blocked SSRF target: ${url}`);
       }
       break;
     }
