@@ -132,7 +132,7 @@ webhook.post('/webhook', async (c) => {
   const valid = await verifySignature(channelSecret, rawBody, signature);
   if (!valid) {
     const dest = body.destination ?? 'unknown';
-    console.error(`[webhook] signature mismatch: destination=${dest} sig_received=${signature.slice(0, 12)}... secret_prefix=${channelSecret ? channelSecret.slice(0, 6) + '...' : 'MISSING'} accounts_checked=${matchedAccountId ? 1 : 0}`);
+    console.error(`[webhook] signature mismatch: destination=${dest} secret_present=${!!channelSecret} accounts_checked=${matchedAccountId ? 1 : 0}`);
     return c.json({ status: 'ok' }, 200);
   }
 
