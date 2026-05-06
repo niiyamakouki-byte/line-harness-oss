@@ -132,8 +132,15 @@ async function processAutomations(
     );
 
     for (const automation of automations) {
-      const conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
-      const actions = JSON.parse(automation.actions) as Array<{ type: string; params: Record<string, string> }>;
+      let conditions: Record<string, unknown>;
+      let actions: Array<{ type: string; params: Record<string, string> }>;
+      try {
+        conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
+        actions = JSON.parse(automation.actions) as Array<{ type: string; params: Record<string, string> }>;
+      } catch {
+        console.error(`[event-bus] automation ${automation.id} has invalid JSON conditions/actions`);
+        continue;
+      }
 
       // 条件チェック（簡易版: 条件が空なら常にマッチ）
       if (!matchConditions(conditions, payload)) continue;
@@ -257,7 +264,13 @@ async function executeAction(
       const lineClient = new LineClient(lineAccessToken);
       const msgType = action.params.messageType || 'text';
       if (msgType === 'flex') {
-        const contents = JSON.parse(action.params.content);
+        let contents: unknown;
+        try {
+          contents = JSON.parse(action.params.content);
+        } catch {
+          console.error('[event-bus] send_message: invalid flex JSON content');
+          break;
+        }
         await lineClient.pushMessage(friend.line_user_id, [
           { type: 'flex', altText: action.params.altText || 'Message', contents },
         ]);
@@ -314,8 +327,15 @@ async function executeAction(
         .prepare('SELECT metadata FROM friends WHERE id = ?')
         .bind(friendId)
         .first<{ metadata: string }>();
-      const current = JSON.parse(existing?.metadata || '{}') as Record<string, unknown>;
-      const patch = JSON.parse(action.params.data || '{}') as Record<string, unknown>;
+      let current: Record<string, unknown>;
+      let patch: Record<string, unknown>;
+      try {
+        current = JSON.parse(existing?.metadata || '{}') as Record<string, unknown>;
+        patch = JSON.parse(action.params.data || '{}') as Record<string, unknown>;
+      } catch {
+        console.error('[event-bus] set_metadata: invalid JSON in metadata or action params');
+        break;
+      }
       const merged = { ...current, ...patch };
       await db
         .prepare('UPDATE friends SET metadata = ?, updated_at = ? WHERE id = ?')
