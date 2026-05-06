@@ -95,7 +95,9 @@ export function buildSavePath(
 ): string {
   const base = `${getHomeDir()}/mtm-projects`;
   const { company, project } = classification;
-  return `${base}/${company}/${project}/${filename}`;
+  // Strip directory traversal components from the filename
+  const safeFilename = filename.replace(/[/\\]/g, '_').replace(/^\.+/, '_');
+  return `${base}/${company}/${project}/${safeFilename}`;
 }
 
 /**
